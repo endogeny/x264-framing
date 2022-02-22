@@ -9,5 +9,8 @@ version = "0.1.0"
 authors = ["Ram <quadrupleslap@gmail.com>"]
 
 [dependencies]
-framing = "0.6"
-x264-sys = "0.1"
+framing = "0.6.1"
+x264-sys = "0.2.0"
+
+[patch.crates-io]
+framing = { git = "https://github.com/sassman/framing" }

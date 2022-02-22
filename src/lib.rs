@@ -15,14 +15,15 @@ pub use format::Format;
 pub use image::Image;
 pub use setup::{Preset, Setup, Tune};
 
-use std::{mem, ptr};
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
+use std::ptr;
 use x264_sys::x264;
 
 /// Encodes your video. Be nice to it!
 pub struct Encoder<F> {
     raw: *mut x264::x264_t,
-    spooky: PhantomData<F>
+    spooky: PhantomData<F>,
 }
 
 impl<F> Encoder<F> {
@@ -32,38 +33,41 @@ impl<F> Encoder<F> {
     /// [`pts`](https://en.wikipedia.org/wiki/Presentation_timestamp) to encode.
     /// The output is a byte sequence you can feed to stuff, and some image
     /// data that you can use, too - you hopefully being a muxer or something.
-    pub fn encode<T>(&mut self, pts: i64, image: &T)
-        -> Result<(Data, Picture), Error>
+    pub fn encode<T>(&mut self, pts: i64, image: &T) -> Result<(Data, Picture), Error>
     where
         T: Image<Format = F>,
-        F: Format
+        F: Format,
     {
-        let mut picture = unsafe {
-            let mut picture = mem::uninitialized();
-            x264::x264_picture_init(&mut picture);
+        let mut picture = {
+            let mut picture = MaybeUninit::uninit();
+            unsafe {
+                x264::x264_picture_init(picture.as_mut_ptr());
+            }
+            let mut picture = unsafe { picture.assume_init() };
             picture.i_pts = pts;
             picture.img = x264ify(image);
             picture
         };
 
         let mut len = 0;
-        let mut stuff = unsafe { mem::uninitialized() };
-        let mut raw = unsafe { mem::uninitialized() };
+        let mut stuff = MaybeUninit::uninit();
+        let mut raw = MaybeUninit::uninit();
 
         let err = unsafe {
             x264::x264_encoder_encode(
                 self.raw,
-                &mut stuff,
+                stuff.as_mut_ptr(),
                 &mut len,
                 &mut picture,
-                &mut raw
+                raw.as_mut_ptr(),
             )
         };
 
         if err < 0 {
             Err(Error)
         } else {
-            let data = unsafe { Data::from_raw_parts(stuff, len as _) };
+            let data = unsafe { Data::from_raw_parts(stuff.assume_init(), len as _) };
+            let raw = unsafe { raw.assume_init() };
             Ok((data, Picture { raw }))
         }
     }
@@ -77,23 +81,24 @@ impl<F> Encoder<F> {
     /// streaming purposes (e.g. if you're actually saving the file.)
     pub fn work(&mut self) -> Result<(Data, Picture), Error> {
         let mut len = 0;
-        let mut stuff = unsafe { mem::uninitialized() };
-        let mut raw = unsafe { mem::uninitialized() };
+        let mut stuff = MaybeUninit::uninit();
+        let mut raw = MaybeUninit::uninit();
 
         let err = unsafe {
             x264::x264_encoder_encode(
                 self.raw,
-                &mut stuff,
+                stuff.as_mut_ptr(),
                 &mut len,
                 ptr::null_mut(),
-                &mut raw
+                raw.as_mut_ptr(),
             )
         };
 
         if err < 0 {
             Err(Error)
         } else {
-            let data = unsafe { Data::from_raw_parts(stuff, len as _) };
+            let data = unsafe { Data::from_raw_parts(stuff.assume_init(), len as _) };
+            let raw = unsafe { raw.assume_init() };
             Ok((data, Picture { raw }))
         }
     }
@@ -103,20 +108,15 @@ impl<F> Encoder<F> {
     /// Send this before sending other things.
     pub fn headers(&mut self) -> Result<Data, Error> {
         let mut len = 0;
-        let mut stuff = unsafe { mem::uninitialized() };
+        let mut stuff = MaybeUninit::uninit();
 
-        let err = unsafe {
-            x264::x264_encoder_headers(
-                self.raw,
-                &mut stuff,
-                &mut len
-            )
-        };
+        let err = unsafe { x264::x264_encoder_headers(self.raw, stuff.as_mut_ptr(), &mut len) };
 
         if 0 > err {
             return Err(Error);
         }
 
+        let stuff = unsafe { stuff.assume_init() };
         Ok(unsafe { Data::from_raw_parts(stuff, len as _) })
     }
 
@@ -132,13 +132,15 @@ impl<F> Encoder<F> {
 
 impl<F> Drop for Encoder<F> {
     fn drop(&mut self) {
-        unsafe { x264::x264_encoder_close(self.raw); }
+        unsafe {
+            x264::x264_encoder_close(self.raw);
+        }
     }
 }
 
 /// Output picture data.
 pub struct Picture {
-    raw: x264::x264_picture_t
+    raw: x264::x264_picture_t,
 }
 
 impl Picture {
@@ -168,12 +170,11 @@ fn x264ify<T: Image>(img: &T) -> x264::x264_image_t {
         i_csp: T::Format::colorspace(),
         i_plane: T::Format::plane_count(),
         i_stride: img.strides(),
-        plane:
-            [
-                planes[0] as _,
-                planes[1] as _,
-                planes[2] as _,
-                planes[3] as _
-            ]
+        plane: [
+            planes[0] as _,
+            planes[1] as _,
+            planes[2] as _,
+            planes[3] as _,
+        ],
     }
 }
