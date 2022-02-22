@@ -1,8 +1,8 @@
-use Format;
-use framing::{AsBytes, Chunky};
 use framing::Image as Frame;
+use framing::{AsBytes, Chunky};
 use std::os::raw::c_int;
 use std::ptr;
+use Format;
 
 /// Represents an image that can be handed over to x264.
 pub trait Image {
@@ -17,7 +17,7 @@ pub trait Image {
 impl<F, T> Image for Chunky<F, T>
 where
     T: AsRef<[u8]>,
-    F: AsBytes + Format
+    F: AsBytes + Format,
 {
     type Format = F;
 
@@ -26,6 +26,11 @@ where
     }
 
     fn planes(&self) -> [*const u8; 4] {
-        [self.bytes().as_ref().as_ptr(), ptr::null(), ptr::null(), ptr::null()]
+        [
+            self.bytes().as_ref().as_ptr(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+        ]
     }
 }

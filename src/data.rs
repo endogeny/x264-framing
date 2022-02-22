@@ -6,21 +6,29 @@ use x264;
 pub struct Data<'a> {
     ptr: *mut x264::x264_nal_t,
     len: usize,
-    spooky: PhantomData<&'a [x264::x264_nal_t]>
+    spooky: PhantomData<&'a [x264::x264_nal_t]>,
 }
 
 impl<'a> Data<'a> {
-    /// Nothing to see here.
-    pub unsafe fn from_raw_parts(
-        ptr: *mut x264::x264_nal_t,
-        len: usize
-    ) -> Self {
-        Data { ptr, len, spooky: PhantomData }
+    /// # Safety
+    ///
+    /// This function requires `ptr` to be initialized
+    pub unsafe fn from_raw_parts(ptr: *mut x264::x264_nal_t, len: usize) -> Self {
+        Data {
+            ptr,
+            len,
+            spooky: PhantomData,
+        }
     }
 
     /// The number of units in this data sequence.
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    /// Checks if data sequence is empty
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// The `i`th unit.
@@ -30,31 +38,22 @@ impl<'a> Data<'a> {
     /// Panics if `i` is out-of-bounds. In order to be not-out-of-bounds, also
     /// known as in-bounds, `i` must be less than `len`.
     pub fn unit(&self, i: usize) -> Unit<'a> {
-        const D: i32 = x264::nal_priority_e::NAL_PRIORITY_DISPOSABLE as _;
-        const L: i32 = x264::nal_priority_e::NAL_PRIORITY_LOW as _;
-        const H: i32 = x264::nal_priority_e::NAL_PRIORITY_HIGH as _;
+        const D: i32 = x264::nal_priority_e_NAL_PRIORITY_DISPOSABLE as _;
+        const L: i32 = x264::nal_priority_e_NAL_PRIORITY_LOW as _;
+        const H: i32 = x264::nal_priority_e_NAL_PRIORITY_HIGH as _;
 
         assert!(i < self.len);
 
-        let nal = unsafe {
-            *self.ptr.offset(i as _)
-        };
+        let nal = unsafe { *self.ptr.add(i as _) };
 
         Unit {
-            priority:
-                match nal.i_ref_idc {
-                    D => Priority::Disposable,
-                    L => Priority::Low,
-                    H => Priority::High,
-                    _ => Priority::Highest,
-                },
-            payload:
-                unsafe {
-                    slice::from_raw_parts(
-                        nal.p_payload,
-                        nal.i_payload as _
-                    )
-                }
+            priority: match nal.i_ref_idc {
+                D => Priority::Disposable,
+                L => Priority::Low,
+                H => Priority::High,
+                _ => Priority::Highest,
+            },
+            payload: unsafe { slice::from_raw_parts(nal.p_payload, nal.i_payload as _) },
         }
     }
 
@@ -69,14 +68,12 @@ impl<'a> Data<'a> {
         } else {
             let (a, b) = unsafe {
                 let a = *self.ptr;
-                let b = *self.ptr.offset((self.len - 1) as _);
+                let b = *self.ptr.add((self.len - 1) as _);
                 (a, b)
             };
 
-            let start  = a.p_payload;
-            let length = b.p_payload as usize
-                       + b.i_payload as usize
-                       - start as usize;
+            let start = a.p_payload;
+            let length = b.p_payload as usize + b.i_payload as usize - start as usize;
 
             unsafe { slice::from_raw_parts(start, length) }
         }
@@ -90,7 +87,7 @@ impl<'a> Data<'a> {
 /// you'll just have to deal with it.
 pub struct Unit<'a> {
     priority: Priority,
-    payload: &'a [u8]
+    payload: &'a [u8],
 }
 
 impl<'a> Unit<'a> {
